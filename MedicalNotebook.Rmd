@@ -1,0 +1,552 @@
+---
+title: "EDA + Regression on Medical Costs"
+author: "Marcos Turial"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    code_folding: hide
+    theme: cosmo
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## About the Dataset
+
+### Context
+
+Machine Learning with R by Brett Lantz is a book that provides an introduction to machine learning using R. As far as I can tell, Packt Publishing does not make its datasets available online unless you buy the book and create a user account which can be a problem if you are checking the book out from the library or borrowing the book from a friend. All of these datasets are in the public domain but simply needed some cleaning up and recoding to match the format in the book.
+
+### Columns
+
+-   age: age of primary beneficiary
+-   sex: insurance contractor gender, female, male
+-   bmi: Body mass index, providing an understanding of body, weights that are relatively high or low relative to height, objective index of body weight (kg / m \^ 2) using the ratio of height to weight, ideally 18.5 to 24.9
+-   children: Number of children covered by health insurance / Number of dependents
+-   smoker: Smoking
+-   region: the beneficiary's residential area in the US, northeast, southeast, southwest, northwest.
+-   charges: Individual medical costs billed by health insurance
+
+### Acknowledgement
+
+The dataset used in this project can be downloaded at [this link.](https://www.kaggle.com/datasets/mirichoi0218/insurance) 
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(scales)
+library(ggthemes)
+library(knitr)
+library(glmnet)
+library(caTools)
+library(Metrics)
+library(randomForest)
+```
+
+
+## Loading and pre-processing data
+
+
+```{r}
+raw <- read_csv('insurance.csv')
+head(raw)
+```
+Now let's check if there are any "NA" values that can cause problems in our data analysis.
+
+```{r}
+any(is.na(raw))
+```
+Good thing to know there are no "NA" values in our data, which is not common but help us a lot and save us some effort. Now we can look at our data to make useful insights and necessary changes.
+
+```{r}
+str(raw)
+```
+
+The columns sex, smoker and region were initially defined as character, but for a better and easier analysis they will be converted to numeric.
+
+```{r}
+raw <- raw %>%
+  mutate_at(c('sex', 'smoker', 'region'), as.factor)
+
+data_num <- raw %>%
+  mutate_at(c('sex', 'smoker', 'region'), as.numeric)
+
+str(data)
+```
+
+Before converting every column to numeric, the strings were converted to factor, which makes easier understanding the data summary.
+
+```{r}
+summary(raw)
+```
+The youngest person in this dataset is 18 years old and the oldest is 64. Apparently everything is fine with the data, so we can study more the correlation between the attributes.
+
+## Data Analysis
+
+```{r}
+corrplot(cor(data_num), method = "square")
+cor(data_num, data_num$charges)
+```
+
+The charges have a strong correlation with the fact of a patient being a smoker or not, what is just as expected. There is also a weaker correlation with the patient age and even weaker with the body mass index (bmi), what is opposed to the expected, since it is common sense people with higher bmi also develop more health problems.
+
+But let's investigate smoking in more detail and see how much patients spend on treatments on average.
+
+### Smoking Influence
+
+```{r}
+  ggplot(raw, aes(x = smoker, fill = sex)) + 
+  geom_bar(position = "dodge" ) +
+  ggtitle('Quantity of smokers and non smokers per sex') + 
+  scale_y_continuous(breaks = seq(0,600,100)) + 
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(colour = "gray70",
+                                  size = 0.5,
+                                  linetype = "dashed"))
+```
+
+```{r}
+  ggplot(raw, aes(x = smoker, y = charges)) + 
+  geom_boxplot(aes(fill = sex)) +
+  ggtitle('Amount of charges for smokers and non smokers') + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = 'K'))
+```
+
+As we can see, the fact of being a smoker or not plays a major role in how much a patient spends in the hospital. But the plot above still hide some information from us, so let's see a violin plot to understand better the data distribution.
+
+```{r}
+sample_size <- raw %>% group_by(smoker) %>% summarise(count = n())
+
+raw %>%
+  left_join(sample_size) %>%
+  mutate(myaxis = paste( smoker, "\n\n", "n =", count)) %>%
+  ggplot(aes(x = myaxis, y = charges)) + 
+  geom_violin(aes(fill = sex)) +
+  ggtitle('Amount of charges for smokers and non smokers') + 
+  xlab("smoker") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(colour = "gray70",
+                                  size = 0.5,
+                                  linetype = "dashed")) + 
+  scale_y_continuous(breaks = seq(0,60000,10000), labels = label_number(scale = 1e-3, suffix = 'K'))
+```
+
+As we can see, the distribution for women and men are quite similar, what means the sex does not have a big influence in whether the patient spends more on treatment or not. Now let's analyze the age distribution and if age is a determinant factor.
+
+```{r}
+ggplot(data_num, aes(x = age, y = ..density..)) +
+  geom_histogram(binwidth = 2, color = "white", fill = "steelblue4") +
+  geom_density(lwd = 1.2, color ='thistle4' ) +
+  ggtitle('Distribution of age') + 
+  scale_x_continuous(breaks = seq(10,75,5), limits = c(10,75)) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(colour = "gray70",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor = element_blank())
+```
+
+As we saw earlier, the ages are between 18 years and 64 ears, but now we have a better notion of how they are distributed. It can be observed a lot of young patients, with less than 20 years old, while other ages are nearly equally distributed.
+
+Let's check if the fact of being a smoker or not is worse for the youngers. 
+
+```{r}
+
+raw %>%
+  filter(age<=20) %>%
+  group_by(smoker) %>%
+ggplot(aes(y = smoker, x = charges)) +
+  geom_boxplot(aes(fill = smoker)) +
+  ggtitle('Charges for patients under 20 years old') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_x_continuous(breaks = seq(0,50000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+
+raw %>%
+  filter(age<=30 & age>20) %>%
+  group_by(smoker) %>%
+ggplot(aes(y = smoker, x = charges)) +
+  geom_boxplot(aes(fill = smoker)) +
+  ggtitle('Charges for patients from 20 to 30 years old') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_x_continuous(breaks = seq(0,55000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+
+raw %>%
+  filter(age<=40 & age>30) %>%
+  group_by(smoker) %>%
+ggplot(aes(y = smoker, x = charges)) +
+  geom_boxplot(aes(fill = smoker)) +
+  ggtitle('Charges for patients from 30 to 40 years old') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_x_continuous(breaks = seq(0,60000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+
+raw %>%
+  filter(age<=50 & age>40) %>%
+  group_by(smoker) %>%
+ggplot(aes(y = smoker, x = charges)) +
+  geom_boxplot(aes(fill = smoker)) +
+  ggtitle('Charges for patients from 40 to 50 years old') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_x_continuous(breaks = seq(0,60000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+```{r}
+
+raw %>%
+  filter(age>50) %>%
+  group_by(smoker) %>%
+ggplot(aes(y = smoker, x = charges)) +
+  geom_boxplot(aes(fill = smoker)) +
+  ggtitle('Charges for patients over 50 years old') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_x_continuous(breaks = seq(0,70000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+The graphs let us no doubt. The charges for smoking patients are incredibly higher than the ones for non-smoking. And this is specially true for patients under 20 years old, when the difference is enormous.
+The graphs also show us some outliers in charges for non-smoking patients at any age, which is probably due to some serious disease or accident. Nevertheless, the charges for smoking patients have no visible outliers, which means all smokers in the collected data, spends a lot on treatments. 
+
+```{r}
+
+raw %>%
+  filter(smoker == 'yes') %>%
+ggplot(aes(y = charges, x = age)) +
+  geom_point(pch=16, color = "darkorange3") +
+  ggtitle('Charges by smoking patients age') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous(breaks = seq(0,70000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(color = "#cacaca",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor.y = element_blank())
+
+```
+
+```{r}
+
+raw %>%
+  filter(smoker == 'no') %>%
+ggplot(aes(y = charges, x = age)) +
+  geom_point(pch=16, color = "forestgreen") +
+  ggtitle('Charges by non-smoking patients age') + 
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous(breaks = seq(0,70000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(color = "#cacaca",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor.y = element_blank())
+
+```
+
+
+```{r}
+
+raw %>%
+ggplot(aes(y = charges, x = age, color = smoker)) +
+  geom_point(pch=16) +
+  ggtitle('Smokers and non smokers') + 
+  scale_fill_manual(values = c("forestgreen", "darkorange3")) +
+  scale_y_continuous(breaks = seq(0,70000,5000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(color = "#cacaca",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor.y = element_blank()) +
+  geom_smooth(method = "lm", formula = y ~ x)
+
+```
+
+The charges for non-smokers follow quite straight the linear model, increasing with patients age. There are some higher values probably due to diseases and accidents.
+As for smokers, the values doesn't fit in the linear model, even though they increase a bit with patients age. The outliers are the "expected" when the patient is a smoker and in the best scenarios they spend as much as the non-smokers patients who spend more on treatments.
+
+I think that is enough reason for you to stop smoking if you haven't already! Join the healthy side of the force!
+
+<center>
+<img src="https://media.giphy.com/media/hoxJHQLz31zCEdA0Bw/giphy.gif" width = 50% ></img>
+</center>
+
+Since we have already checked the behavior of how much a patient spends on treatment accordingly to ones age and smoking habit, let's now check the influence of the other relevant attribute, the body mass index(bmi).
+
+
+### Body Mass Index (bmi) Influence
+
+Body Mass Index is a simple calculation using a person's height and weight. The formula is:
+$$BMI = kg/m^2$$
+where kg is a person's weight in kilograms and m^2^ is the square of their height in meters.
+
+Accordingly to the World Healthy Organization (WHO), for adults until 65 years old, BMI falls into one of the following categories.
+
+|    BMI      | Nutritional Status |
+| :-------:   |  :--------------:  |
+| Below 18.5  | Underweight        |
+| 18.5 – 24.9 | Normal weight      |
+| 25.0 – 29.9 | Pre-obesity        |
+| 30.0 – 34.9 | Obesity class I    |
+| 35.0 – 39.9 | Obesity class II   |
+| Above 40    | Obesity class III  |
+
+Now let's check if it has something to do with how much a patient spends on treatment. Just looking at the definition of BMI, is expected that when it comes above 30, the patients start to develop more diseases and the charges increase.
+
+```{r}
+
+data_num %>%
+ggplot(aes(x = bmi, y = ..density..)) +
+  geom_histogram(binwidth = 2, fill = "darkgoldenrod3", color = "gray30") +
+  geom_density(lwd=1.1, color = "coral4") +
+  ggtitle('Distribution of BMI') + 
+  scale_x_continuous(breaks = seq(0,50, by = 5), limits = c(10,55)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(color = "#cacaca",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor.y = element_blank())
+
+summary(data_num$bmi)
+```
+
+
+```{r}
+
+raw %>%
+ggplot(aes(y = charges, x = bmi, color = smoker)) +
+  geom_point(pch=16) +
+  ggtitle('Charges by BMI') + 
+  scale_y_continuous(breaks = seq(0,70000,10000),
+                     labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid = element_line(color = "#cacaca",
+                                  size = 0.5,
+                                  linetype = "dashed"),
+        panel.grid.minor.y = element_blank()) +
+  geom_smooth(method = "lm", formula = y ~ x)
+
+```
+
+As we can see above, the BMI alone is not enough for a person develop diseases and spend a lot on treatments, since the charges for non-smokers are nearly constant, despite the person's BMI.
+
+As for smokers, the BMI can clearly worsen the healthy situation. The graph show us a considerable rise in charges for patients who smoke and have a BMI over 30, the point where obesity starts. 
+
+
+## Regression Models 
+
+Now let's make some regression models and see which one performs better, after some hyperparameters adjustment. 
+
+### Linear Regression
+
+Let's start with the classic linear regression.
+
+```{r}
+set.seed(777)
+
+sample <- sample.split(data_num$age, SplitRatio = 0.8)
+train <- subset(data_num, sample == T)
+test <- subset(data_num, sample == F)
+
+linear_model <- lm(charges ~ ., data = train)
+
+```
+
+#### Model Results {.tabset}
+
+After testing some combinations to predict the charges, the linear model using all the other columns performed better, but all of them had very similar parameters. 
+
+```{r}
+summary(linear_model)
+```
+As it can be seen above, the R~2~ for the first model was around 0.75, not bad for the first approach for a regression model, especially without any normalization or hyperparameters adjustment.
+
+We can also calculate the R~2~ for the testing data, which happens to be almost the same
+
+```{r}
+data.frame("R2 train" = R2(train$charges, predict(linear_model, train)),
+           "R2 test" = R2(test$charges, predict(linear_model, test)))
+```
+
+### Polynomial Regression
+
+What if our data is actually more complex than a simple straight line? 
+
+Surprisingly,we can actually use a linear model to fit nonlinear data. For that, we are going to add powers to each feature as new features and train a linear model on this extended set of features. This technique is called Polynomial Regression.
+
+
+```{r}
+
+poly_model <- lm(charges ~ .^2 , data = train)
+summary(poly_model)
+
+
+```
+
+```{r}
+data.frame("R2 train" = R2(train$charges, predict(poly_model, train)),
+           "R2 test" = R2(test$charges, predict(poly_model, test))) %>%
+  kable(digits = 3)
+```
+
+### Ridge and Lasso Regression
+
+
+
+```{r}
+
+train_matrix <- model.matrix(charges ~ ., data = train)
+test_matrix <- model.matrix(charges ~ ., data = test)
+train_matrix_sqr <- model.matrix(charges ~ .^2, data = train)
+test_matrix_sqr <- model.matrix(charges ~ .^2, data = test)
+
+y_train <- train$charges
+y_test <- test$charges
+
+lambda_grid <- 10^seq(-2,10, length.out = 100)
+
+cv.ridge1 <- cv.glmnet(train_matrix, y_train, alpha = 0, lambda = lambda_grid)
+
+plot(cv.ridge1)
+```
+
+
+```{r}
+list_of_fits <- list()
+
+for (i in 0:10) {
+  alpha_value <- paste("alpha", i/10)
+  
+  list_of_fits[[alpha_value]] <- 
+    cv.glmnet(train_matrix, y_train, alpha = i/10, type.measure = "mse")
+}
+
+results <- data.frame()
+
+for (i in 0:10) {
+  alpha_value <- paste("alpha", i/10)
+  
+  predicted <-
+    predict(list_of_fits[[alpha_value]], 
+    s = list_of_fits[[alpha_value]]$lambda.1se,
+    newx = test_matrix)
+  
+  predicted_train <-
+    predict(list_of_fits[[alpha_value]], 
+    s = list_of_fits[[alpha_value]]$lambda.1se,
+    newx = train_matrix)
+  
+  rmse <- rmse(y_test, predicted)
+  R2_test <- R2(y_test, predicted)
+  R2_train <- R2(y_train, predicted_train)
+  
+  temp <- data.frame(alpha = alpha_value, rmse = rmse,
+                     R2_test = R2_test, R2_train = R2_train)
+  results <- rbind(results, temp)
+}
+
+results %>%
+  kable(caption = "Elastic Net Regression for Linear Model", digits = 4)
+```
+
+```{r}
+list_of_fits_poly <- list()
+
+for (i in 0:10) {
+  alpha_value <- paste("alpha", i/10)
+  
+  list_of_fits_poly[[alpha_value]] <- 
+    cv.glmnet(train_matrix_sqr, y_train, alpha = i/10, type.measure = "mse")
+}
+
+results_poly <- data.frame()
+
+for (i in 0:10) {
+  alpha_value <- paste("alpha", i/10)
+  
+  predicted_sqr <-
+    predict(list_of_fits_poly[[alpha_value]], 
+    s = list_of_fits_poly[[alpha_value]]$lambda.1se,
+    newx = test_matrix_sqr)
+  
+  predicted_train_sqr <-
+    predict(list_of_fits_poly[[alpha_value]], 
+    s = list_of_fits_poly[[alpha_value]]$lambda.1se,
+    newx = train_matrix_sqr)
+  
+  rmse_sqr <- rmse(y_test, predicted_sqr)
+  R2_test_sqr <- R2(y_test, predicted_sqr)
+  R2_train_sqr <- R2(y_train, predicted_train_sqr)
+  
+  temp <- data.frame(alpha = alpha_value, rmse = rmse_sqr,
+                     R2_test = R2_test_sqr, R2_train = R2_train_sqr)
+  results_poly <- rbind(results_poly, temp)
+}
+
+results_poly %>%
+  kable(caption = "Elastic Net Regression for Quadratic Model", digits = 4)
+```
+
+### Random Forest
+
+```{r}
+
+rf <- randomForest(charges ~.,
+                   data = train,
+                   ntree = 200,
+                   mtry = 4
+                   )
+
+R2(train$charges, rf$predicted)
+R2(train$charges, predict(rf, train))
+R2(test$charges, predict(rf, newdata = test))
+
+```
+
+```{r}
+data.frame("R2 train" = R2(train$charges, predict(rf, train)),
+           "R2 test" = R2(test$charges, predict(rf, test))) %>%
+  kable(digits = 4)
+```
+
+
+
+
+```{r}
+rf
+```
+
+
