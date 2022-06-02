@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 ### Context
 
-Machine Learning with R by Brett Lantz is a book that provides an introduction to machine learning using R. As far as I can tell, Packt Publishing does not make its datasets available online unless you buy the book and create a user account which can be a problem if you are checking the book out from the library or borrowing the book from a friend. All of these datasets are in the public domain but simply needed some cleaning up and recoding to match the format in the book.
+  Machine Learning with R by Brett Lantz is a book that provides an introduction to machine learning using R. As far as I can tell, Packt Publishing does not make its datasets available online unless you buy the book and create a user account which can be a problem if you are checking the book out from the library or borrowing the book from a friend. All of these datasets are in the public domain but simply needed some cleaning up and recoding to match the format in the book.
 
 ### Columns
 
@@ -34,9 +34,11 @@ Machine Learning with R by Brett Lantz is a book that provides an introduction t
 
 ### Acknowledgement
 
-The dataset used in this project can be downloaded at [this link.](https://www.kaggle.com/datasets/mirichoi0218/insurance) 
+  For more information about this dataset you can access [this link.](https://www.kaggle.com/datasets/mirichoi0218/insurance) 
 
 ## Libraries
+
+  All the libraries used in this notebook are listed in the code chunk below.
 
 ```{r}
 library(tidyverse)
@@ -49,60 +51,80 @@ library(glmnet)
 library(caTools)
 library(Metrics)
 library(randomForest)
+library(kableExtra)
+library(fastDummies)
 ```
 
 
 ## Loading and pre-processing data
 
-
 ```{r}
 raw <- read_csv('insurance.csv')
-head(raw)
+
+head(raw) %>%
+  kable() %>%
+  kable_styling(full_width = F)
 ```
-Now let's check if there are any "NA" values that can cause problems in our data analysis.
+  Now let's check if there are any "NA" values that can cause problems in our data analysis.
 
 ```{r}
 any(is.na(raw))
 ```
-Good thing to know there are no "NA" values in our data, which is not common but help us a lot and save us some effort. Now we can look at our data to make useful insights and necessary changes.
+  Good thing to know there are no "NA" values in our data, which is not common but help us a lot and save us some effort. Now we can look at our data to make useful insights and necessary changes.
 
-```{r}
-str(raw)
-```
-
-The columns sex, smoker and region were initially defined as character, but for a better and easier analysis they will be converted to numeric.
+  Now, let's have a quick look at the data description.
 
 ```{r}
 raw <- raw %>%
   mutate_at(c('sex', 'smoker', 'region'), as.factor)
 
-data_num <- raw %>%
-  mutate_at(c('sex', 'smoker', 'region'), as.numeric)
-
-str(data)
+summary(raw) %>%
+  kable() %>%
+  kable_styling(full_width = F)
 ```
 
-Before converting every column to numeric, the strings were converted to factor, which makes easier understanding the data summary.
+  The youngest person in this dataset is 18 years old and the oldest is 64. Apparently everything is fine with the data, so we can make the final adjustments and study more the correlation between the attributes.
+
+### Converting columns to numeric
+
+  The columns sex, smoker and region were initially defined as character, but for take part in the regression models, they need to be converted to numeric.
+
+  Since there are no inheritance for any of these variables, they will be converted to dummy variables (assumes only value 0 or 1).
 
 ```{r}
-summary(raw)
+
+data_num <- dummy_cols(raw, 
+                       select_columns = c("sex", "smoker", "region"), 
+                       remove_selected_columns = T,
+                       remove_first_dummy = T)
+
+colnames(data_num)[which(names(data_num) == "sex_male")] <- "sex" 
+colnames(data_num)[which(names(data_num) == "smoker_yes")] <- "smoker" 
+
+
+head(data_num) %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
 ```
-The youngest person in this dataset is 18 years old and the oldest is 64. Apparently everything is fine with the data, so we can study more the correlation between the attributes.
+
+
 
 ## Data Analysis
 
-```{r}
+```{r, fig.align='center'}
 corrplot(cor(data_num), method = "square")
 cor(data_num, data_num$charges)
 ```
 
-The charges have a strong correlation with the fact of a patient being a smoker or not, what is just as expected. There is also a weaker correlation with the patient age and even weaker with the body mass index (bmi), what is opposed to the expected, since it is common sense people with higher bmi also develop more health problems.
+  The charges have a strong correlation with the fact of a patient being a smoker or not, what is just as expected. There is also a weaker correlation with the patient age and even weaker with the body mass index (bmi), what is opposed to the expected, since it is common sense people with higher bmi also develop more health problems.
 
-But let's investigate smoking in more detail and see how much patients spend on treatments on average.
+  But let's investigate smoking in more detail and see how much patients spend on treatments on average.
 
 ### Smoking Influence
 
-```{r}
+```{r, fig.align='center'}
   ggplot(raw, aes(x = smoker, fill = sex)) + 
   geom_bar(position = "dodge" ) +
   ggtitle('Quantity of smokers and non smokers per sex') + 
@@ -114,7 +136,7 @@ But let's investigate smoking in more detail and see how much patients spend on 
                                   linetype = "dashed"))
 ```
 
-```{r}
+```{r, fig.align='center'}
   ggplot(raw, aes(x = smoker, y = charges)) + 
   geom_boxplot(aes(fill = sex)) +
   ggtitle('Amount of charges for smokers and non smokers') + 
@@ -122,9 +144,9 @@ But let's investigate smoking in more detail and see how much patients spend on 
   scale_y_continuous(labels = label_number(scale = 1e-3, suffix = 'K'))
 ```
 
-As we can see, the fact of being a smoker or not plays a major role in how much a patient spends in the hospital. But the plot above still hide some information from us, so let's see a violin plot to understand better the data distribution.
+  As we can see, the fact of being a smoker or not plays a major role in how much a patient spends in the hospital. But the plot above still hide some information from us, so let's see a violin plot to understand better the data distribution.
 
-```{r}
+```{r, fig.align='center'}
 sample_size <- raw %>% group_by(smoker) %>% summarise(count = n())
 
 raw %>%
@@ -142,9 +164,9 @@ raw %>%
   scale_y_continuous(breaks = seq(0,60000,10000), labels = label_number(scale = 1e-3, suffix = 'K'))
 ```
 
-As we can see, the distribution for women and men are quite similar, what means the sex does not have a big influence in whether the patient spends more on treatment or not. Now let's analyze the age distribution and if age is a determinant factor.
+  The distribution for women and men are quite similar, what means the sex does not have a big influence in whether the patient spends more on treatment or not. Now let's analyze the age distribution to see if age is a determinant factor.
 
-```{r}
+```{r, fig.align='center'}
 ggplot(data_num, aes(x = age, y = ..density..)) +
   geom_histogram(binwidth = 2, color = "white", fill = "steelblue4") +
   geom_density(lwd = 1.2, color ='thistle4' ) +
@@ -158,11 +180,11 @@ ggplot(data_num, aes(x = age, y = ..density..)) +
         panel.grid.minor = element_blank())
 ```
 
-As we saw earlier, the ages are between 18 years and 64 ears, but now we have a better notion of how they are distributed. It can be observed a lot of young patients, with less than 20 years old, while other ages are nearly equally distributed.
+  As we saw earlier, the ages are between 18 years and 64 ears, but now we have a better notion of how they are distributed. It can be observed a lot of young patients, with less than 20 years old, while other ages are nearly equally distributed.
 
-Let's check if the fact of being a smoker or not is worse for the youngers. 
+  Let's check if the fact of being a smoker or not is worse for the youngers. 
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(age<=20) %>%
@@ -177,7 +199,7 @@ ggplot(aes(y = smoker, x = charges)) +
 
 ```
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(age<=30 & age>20) %>%
@@ -192,7 +214,7 @@ ggplot(aes(y = smoker, x = charges)) +
 
 ```
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(age<=40 & age>30) %>%
@@ -207,7 +229,7 @@ ggplot(aes(y = smoker, x = charges)) +
 
 ```
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(age<=50 & age>40) %>%
@@ -222,7 +244,7 @@ ggplot(aes(y = smoker, x = charges)) +
 
 ```
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(age>50) %>%
@@ -237,10 +259,11 @@ ggplot(aes(y = smoker, x = charges)) +
 
 ```
 
-The graphs let us no doubt. The charges for smoking patients are incredibly higher than the ones for non-smoking. And this is specially true for patients under 20 years old, when the difference is enormous.
-The graphs also show us some outliers in charges for non-smoking patients at any age, which is probably due to some serious disease or accident. Nevertheless, the charges for smoking patients have no visible outliers, which means all smokers in the collected data, spends a lot on treatments. 
+  The graphs let us no doubt. The charges for smoking patients are incredibly higher than the ones for non-smoking. And this is specially true for patients under 20 years old, when the difference is enormous.
+  
+  The graphs also show us some outliers in charges for non-smoking patients at any age, which is probably due to some serious disease or accident. Nevertheless, the charges for smoking patients have no visible outliers, which means all smokers in the collected data, spends a lot on treatments. 
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(smoker == 'yes') %>%
@@ -258,7 +281,7 @@ ggplot(aes(y = charges, x = age)) +
 
 ```
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
   filter(smoker == 'no') %>%
@@ -277,7 +300,7 @@ ggplot(aes(y = charges, x = age)) +
 ```
 
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
 ggplot(aes(y = charges, x = age, color = smoker)) +
@@ -295,25 +318,25 @@ ggplot(aes(y = charges, x = age, color = smoker)) +
 
 ```
 
-The charges for non-smokers follow quite straight the linear model, increasing with patients age. There are some higher values probably due to diseases and accidents.
+  The charges for non-smokers follow quite straight the linear model, increasing with patients age. There are some higher values probably due to diseases and accidents.
 As for smokers, the values doesn't fit in the linear model, even though they increase a bit with patients age. The outliers are the "expected" when the patient is a smoker and in the best scenarios they spend as much as the non-smokers patients who spend more on treatments.
 
-I think that is enough reason for you to stop smoking if you haven't already! Join the healthy side of the force!
+  I think that is enough reason for you to stop smoking if you haven't already! Join the healthy side of the force!
 
 <center>
 <img src="https://media.giphy.com/media/hoxJHQLz31zCEdA0Bw/giphy.gif" width = 50% ></img>
 </center>
 
-Since we have already checked the behavior of how much a patient spends on treatment accordingly to ones age and smoking habit, let's now check the influence of the other relevant attribute, the body mass index(bmi).
+  Since we have already checked the behavior of how much a patient spends on treatment accordingly to ones age and smoking habit, let's now check the influence of the other relevant attribute, the body mass index(bmi).
 
 
-### Body Mass Index (bmi) Influence
+### Body Mass Index (BMI) Influence
 
-Body Mass Index is a simple calculation using a person's height and weight. The formula is:
+  Body Mass Index is a simple calculation using a person's height and weight. The formula is:
 $$BMI = kg/m^2$$
 where kg is a person's weight in kilograms and m^2^ is the square of their height in meters.
 
-Accordingly to the World Healthy Organization (WHO), for adults until 65 years old, BMI falls into one of the following categories.
+  Accordingly to the World Healthy Organization (WHO), for adults until 65 years old, BMI falls into one of the following categories.
 
 |    BMI      | Nutritional Status |
 | :-------:   |  :--------------:  |
@@ -324,9 +347,9 @@ Accordingly to the World Healthy Organization (WHO), for adults until 65 years o
 | 35.0 – 39.9 | Obesity class II   |
 | Above 40    | Obesity class III  |
 
-Now let's check if it has something to do with how much a patient spends on treatment. Just looking at the definition of BMI, is expected that when it comes above 30, the patients start to develop more diseases and the charges increase.
+  Now let's check if it has something to do with how much a patient spends on treatment. Just looking at the definition of BMI, is expected that when it comes above 30, the patients start to develop more diseases and the charges increase.
 
-```{r}
+```{r, fig.align='center'}
 
 data_num %>%
 ggplot(aes(x = bmi, y = ..density..)) +
@@ -344,7 +367,7 @@ summary(data_num$bmi)
 ```
 
 
-```{r}
+```{r, fig.align='center'}
 
 raw %>%
 ggplot(aes(y = charges, x = bmi, color = smoker)) +
@@ -361,21 +384,21 @@ ggplot(aes(y = charges, x = bmi, color = smoker)) +
 
 ```
 
-As we can see above, the BMI alone is not enough for a person develop diseases and spend a lot on treatments, since the charges for non-smokers are nearly constant, despite the person's BMI.
+  As we can see above, the BMI alone is not enough for a person develop diseases and spend a lot on treatments, since the charges for non-smokers are nearly constant, despite the person's BMI.
 
-As for smokers, the BMI can clearly worsen the healthy situation. The graph show us a considerable rise in charges for patients who smoke and have a BMI over 30, the point where obesity starts. 
+  As for smokers, the BMI can clearly worsen the healthy situation. The graph show us a considerable rise in charges for patients who smoke and have a BMI over 30, the point where obesity starts. 
 
 
 ## Regression Models 
 
-Now let's make some regression models and see which one performs better, after some hyperparameters adjustment. 
+  Now let's make some regression models and see which one performs better, after some hyperparameters adjustment. 
 
 ### Linear Regression
 
-Let's start with the classic linear regression.
+  Let's start with the classic linear regression.
 
 ```{r}
-set.seed(777)
+set.seed(77)
 
 sample <- sample.split(data_num$age, SplitRatio = 0.8)
 train <- subset(data_num, sample == T)
@@ -385,27 +408,29 @@ linear_model <- lm(charges ~ ., data = train)
 
 ```
 
-#### Model Results {.tabset}
 
-After testing some combinations to predict the charges, the linear model using all the other columns performed better, but all of them had very similar parameters. 
+  After testing some combinations to predict the charges, the linear model using all the other columns performed better, but all of them had very similar parameters. 
 
 ```{r}
 summary(linear_model)
 ```
-As it can be seen above, the R~2~ for the first model was around 0.75, not bad for the first approach for a regression model, especially without any normalization or hyperparameters adjustment.
+  
+  As shown above, the R^2^ for the first model was around 0.75, not bad for the first approach for a regression model, especially without any normalization or hyperparameters adjustment.
 
-We can also calculate the R~2~ for the testing data, which happens to be almost the same
+  We can also calculate the R^2^ for the testing data, which happens to be almost the same
 
 ```{r}
-data.frame("R2 train" = R2(train$charges, predict(linear_model, train)),
-           "R2 test" = R2(test$charges, predict(linear_model, test)))
+data.frame("R2_train" = R2(train$charges, predict(linear_model, train)),
+           "R2_test" = R2(test$charges, predict(linear_model, test))) %>%
+kable(caption = "Metrics", digits = 3) %>%
+kable_styling(full_width = F)
 ```
 
 ### Polynomial Regression
 
-What if our data is actually more complex than a simple straight line? 
+  What if our data is actually more complex than a simple straight line? 
 
-Surprisingly,we can actually use a linear model to fit nonlinear data. For that, we are going to add powers to each feature as new features and train a linear model on this extended set of features. This technique is called Polynomial Regression.
+  Surprisingly, we can actually use a linear model to fit nonlinear data. For that, we are going to add powers to each feature as new features and train a linear model on this extended set of features. This technique is called Polynomial Regression.
 
 
 ```{r}
@@ -417,14 +442,32 @@ summary(poly_model)
 ```
 
 ```{r}
-data.frame("R2 train" = R2(train$charges, predict(poly_model, train)),
-           "R2 test" = R2(test$charges, predict(poly_model, test))) %>%
-  kable(digits = 3)
+data.frame("R2_train" = R2(train$charges, predict(poly_model, train)),
+           "R2_test" = R2(test$charges, predict(poly_model, test))) %>%
+kable(caption = "Metrics", digits = 3) %>%
+kable_styling(full_width = F)
 ```
 
-### Ridge and Lasso Regression
+  In the Regression above, we used a degree = 2 to predict the costs. Since increasing the degree over 2 for the Polynomial Regression didn't show us any better results, we stopped there to optimize performance.
+
+  The more we increase the degree of a Polynomial Regression, more terms are generated as a combination of the features, resulting in more processing time and not necessarily better results. For example, in a polynomial regression containing two features a and b with degree = 3, there would be added the features a^3^, b^3^, a^2^, b^2^, a^2^b and ab^2^.
 
 
+### Ridge, Lasso and Elastic Net
+
+
+  Ridge Regression is a regularized version of Linear Regression. It adds a regularization term (the l~2~ penalty) to the cost functions that forces the learning algorithm to not only fit the data but also keep the model weights as small as possible.
+
+
+  Lasso Regression is another regularized version of Linear Regression: just like Ridge
+Regression, it adds a regularization term to the cost function, but it uses the l~1~ penalty instead of l~2~. But Lasso tends to completely eliminate the weights of the least important features, shrinking them all the way to zero.
+
+  Let's not define what are the penalties l~1~ and l~2~ for now, not to get into advanced math explanations.
+
+
+  Elastic Net is a middle ground between Ridge Regression and Lasso Regression. The regularization term is simply mix of both Ridge and Lasso’s regularization terms, and you can control the mix ratio $\alpha$ in the glmnet library. When $\alpha$ = 0, Elastic Net is equivalent to Ridge Regression, and when $\alpha$ = 1, it is equivalent to Lasso Regression.
+
+  Since we don't know which type of regularization will perform better, we can perform an elastic net regression, increasing the $\alpha$ by a small value and printing the result's metrics into a table to see which $\alpha$ resulted in a better model.
 
 ```{r}
 
@@ -438,9 +481,6 @@ y_test <- test$charges
 
 lambda_grid <- 10^seq(-2,10, length.out = 100)
 
-cv.ridge1 <- cv.glmnet(train_matrix, y_train, alpha = 0, lambda = lambda_grid)
-
-plot(cv.ridge1)
 ```
 
 
@@ -451,7 +491,7 @@ for (i in 0:10) {
   alpha_value <- paste("alpha", i/10)
   
   list_of_fits[[alpha_value]] <- 
-    cv.glmnet(train_matrix, y_train, alpha = i/10, type.measure = "mse")
+    cv.glmnet(train_matrix, y_train, alpha = i/10, type.measure = "mse", lambda = lambda_grid)
 }
 
 results <- data.frame()
@@ -473,14 +513,19 @@ for (i in 0:10) {
   R2_test <- R2(y_test, predicted)
   R2_train <- R2(y_train, predicted_train)
   
-  temp <- data.frame(alpha = alpha_value, rmse = rmse,
+  temp <- data.frame(alpha = i/10, rmse = rmse,
                      R2_test = R2_test, R2_train = R2_train)
   results <- rbind(results, temp)
 }
 
 results %>%
-  kable(caption = "Elastic Net Regression for Linear Model", digits = 4)
+  kable(caption = "Elastic Net Regression for Linear Model", 
+        digits = 4,
+        row.names = F) %>%
+  kable_styling(full_width = F)
 ```
+
+  We can also add regularization after the model being expanded to polynomial, so let's do the same thing to the polynomial model built earlier.
 
 ```{r}
 list_of_fits_poly <- list()
@@ -489,7 +534,7 @@ for (i in 0:10) {
   alpha_value <- paste("alpha", i/10)
   
   list_of_fits_poly[[alpha_value]] <- 
-    cv.glmnet(train_matrix_sqr, y_train, alpha = i/10, type.measure = "mse")
+    cv.glmnet(train_matrix_sqr, y_train, alpha = i/10, type.measure = "mse", lambda = lambda_grid)
 }
 
 results_poly <- data.frame()
@@ -511,42 +556,53 @@ for (i in 0:10) {
   R2_test_sqr <- R2(y_test, predicted_sqr)
   R2_train_sqr <- R2(y_train, predicted_train_sqr)
   
-  temp <- data.frame(alpha = alpha_value, rmse = rmse_sqr,
+  temp <- data.frame(alpha = i/10, rmse = rmse_sqr,
                      R2_test = R2_test_sqr, R2_train = R2_train_sqr)
   results_poly <- rbind(results_poly, temp)
 }
 
 results_poly %>%
-  kable(caption = "Elastic Net Regression for Quadratic Model", digits = 4)
+  kable(caption = "Elastic Net Regression for Quadratic Model", 
+        digits = 4,
+        row.names = F) %>%
+  kable_styling(full_width = F)
 ```
 
+  For this data, we can see that neither Ridge or Lasso Regression resulted in a better performance for the prediction model. This is probably because the training sample was well randomly selected and our initial models were already fitted to the data.
+
 ### Random Forest
+
+  Finally, let's try to predict the costs using Random Forest Regression.
 
 ```{r}
 
 rf <- randomForest(charges ~.,
                    data = train,
                    ntree = 200,
-                   mtry = 4
+                   mtry = 3
                    )
 
-R2(train$charges, rf$predicted)
-R2(train$charges, predict(rf, train))
-R2(test$charges, predict(rf, newdata = test))
-
-```
-
-```{r}
-data.frame("R2 train" = R2(train$charges, predict(rf, train)),
-           "R2 test" = R2(test$charges, predict(rf, test))) %>%
-  kable(digits = 4)
-```
-
-
-
-
-```{r}
 rf
 ```
+
+```{r}
+data.frame("R2_train" = R2(train$charges, predict(rf, train)),
+           "R2_test" = R2(test$charges, predict(rf, test))) %>%
+  kable(caption = "Random Forest Model", 
+        digits = 4,
+        row.names = F) %>%
+  kable_styling(full_width = F)
+```
+
+
+### Comparison
+
+  The linear model had the worst performance, whilst the random forest seems to have the best one. This is probably due to the non-linearity of the data, since when we transformed the linear model into a quadratic one, the predictions were much better already.
+
+  It's clear that the Random Forest Regression adapted better to the training than to the test data (a bit of overfitting), which is really common with decision tree algorithms. Perhaps it could have a better performance after tuning the hyperparameters using grid search, but the dataset is not big enough to make much improvements.
+
+
+
+
 
 
