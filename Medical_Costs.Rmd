@@ -1,11 +1,12 @@
 ---
-title: "EDA + Regression on Medical Costs"
+title: "Medical Costs EDA and Prediction"
 author: "Marcos Turial"
 date: "`r Sys.Date()`"
 output:
   html_document:
     toc: true
-    toc_depth: 2
+    toc_float: true
+    toc_depth: 3
     code_folding: hide
     theme: cosmo
 editor_options: 
@@ -15,6 +16,20 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
+
+```{css, echo = FALSE}
+#TOC {
+    top: 30%;
+```
+
+## A Quick Overview
+
+  The main goal of this project is to figure out what habits or life conditions have more influence in how much one spends in hospital (such as being a smoker, being obese or being old) and then build regression models able to predict well the charges one will have in the hospital given some of their characteristics.
+  
+  The dataset was obtained from Kaggle and needed very little cleaning and preparation, so the focus of this project is in data visualization, the insights obtained from it, and the regression models.
+  
+  The Exploratory Data Analysis (EDA) shows us that the smoking habit is the greatest villain for people seeking hospitals, and when combined with advanced age or high body mass, it becomes even worst. So let's dive into the Analysis and keep ourselves healthy!
+
 
 ## About the Dataset
 
@@ -374,7 +389,7 @@ summary(data_num$bmi)
 raw %>%
 ggplot(aes(y = charges, x = bmi, color = smoker)) +
   geom_point(pch=16) +
-  ggtitle('Charges by BMI') + 
+  ggtitle('Charges by BMI for smokers and non-smokers') + 
   scale_y_continuous(breaks = seq(0,70000,10000),
                      labels = label_number(scale = 1e-3, suffix = "K", accuracy = 5)) +
   theme(plot.title = element_text(hjust = 0.5),
